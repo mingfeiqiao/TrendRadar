@@ -1064,7 +1064,7 @@ class NewsAnalyzer:
         print(f"开始爬取数据，请求间隔 {self.request_interval} 毫秒")
         Path("output").mkdir(parents=True, exist_ok=True)
 
-        results, id_to_name, failed_ids = self.data_fetch.crawl_websites(
+        results, id_to_name, failed_ids = self.data_fetcher.crawl_websites(
             ids, self.request_interval
         )
 
