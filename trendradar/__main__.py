@@ -1064,9 +1064,40 @@ class NewsAnalyzer:
         print(f"开始爬取数据，请求间隔 {self.request_interval} 毫秒")
         Path("output").mkdir(parents=True, exist_ok=True)
 
-        results, id_to_name, failed_ids = self.data_fetcher.crawl_websites(
+        results, id_to_name, failed_ids = self.data_fetch.crawl_websites(
             ids, self.request_interval
         )
+
+        # Twitter 热搜爬取
+        twitter_config = self.ctx.config.get("TWITTER", {})
+        if twitter_config.get("ENABLED"):
+            try:
+                from trendradar.crawler.twitter import TwitterFetcher
+
+                auth_config = twitter_config.get("AUTH", {})
+                fetch_config = twitter_config.get("FETCH", {})
+
+                twitter_fetcher = TwitterFetcher(
+                    username=auth_config.get("USERNAME", ""),
+                    email=auth_config.get("EMAIL", ""),
+                    password=auth_config.get("PASSWORD", ""),
+                    cookies_file=auth_config.get("COOKIES_FILE", "config/twitter_cookies.json"),
+                    proxy_url=twitter_config.get("PROXY_URL", ""),
+                    trends_count=fetch_config.get("TRENDS_COUNT", 20),
+                )
+
+                twitter_results, twitter_name, twitter_failed = twitter_fetcher.fetch_trends_sync()
+
+                # 合并结果
+                results.update(twitter_results)
+                id_to_name.update({"twitter": twitter_name})
+                failed_ids.extend(twitter_failed)
+
+            except ImportError:
+                print("[Twitter] twikit 未安装，跳过 Twitter 热搜")
+            except Exception as e:
+                print(f"[Twitter] 爬取失败: {e}")
+                failed_ids.append("twitter")
 
         # 转换为 NewsData 格式并保存到存储后端
         crawl_time = self.ctx.format_time()

@@ -359,6 +359,31 @@ def _load_filter_config(config_data: Dict) -> Dict:
     }
 
 
+def _load_twitter_config(config_data: Dict) -> Dict:
+    """加载 Twitter 配置"""
+    twitter = config_data.get("twitter", {})
+    auth = twitter.get("auth", {})
+    fetch = twitter.get("fetch", {})
+
+    # 环境变量覆盖
+    enabled_env = _get_env_bool("TWITTER_ENABLED")
+
+    return {
+        "ENABLED": enabled_env if enabled_env is not None else twitter.get("enabled", False),
+        "AUTH": {
+            "USERNAME": _get_env_str("TWITTER_USERNAME") or auth.get("username", ""),
+            "EMAIL": _get_env_str("TWITTER_EMAIL") or auth.get("email", ""),
+            "PASSWORD": _get_env_str("TWITTER_PASSWORD") or auth.get("password", ""),
+            "COOKIES_FILE": auth.get("cookies_file", "config/twitter_cookies.json"),
+        },
+        "FETCH": {
+            "TRENDS_COUNT": fetch.get("trends_count", 20),
+            "INCLUDE_TWEETS": fetch.get("include_tweets", False),
+        },
+        "PROXY_URL": _get_env_str("TWITTER_PROXY_URL") or twitter.get("proxy_url", ""),
+    }
+
+
 def _load_storage_config(config_data: Dict) -> Dict:
     """加载存储配置"""
     storage = config_data.get("storage", {})
@@ -580,6 +605,9 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
 
     # RSS 配置
     config["RSS"] = _load_rss_config(config_data)
+
+    # Twitter 配置
+    config["TWITTER"] = _load_twitter_config(config_data)
 
     # AI 模型共享配置
     config["AI"] = _load_ai_config(config_data)

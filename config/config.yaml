@@ -79,6 +79,31 @@ platforms:
       name: "知乎"
 
 
+# ===============================================================
+# 3.5 数据源 - Twitter/X 热搜
+#
+# 使用 twikit 调用 Twitter 内部 API 获取热搜趋势
+# 需要配置 Twitter 账号登录信息
+# ===============================================================
+twitter:
+  enabled: false                          # 是否启用 Twitter 热搜抓取
+
+  # 认证配置建议使用环境变量）
+  # 环境变量: TWITTER_USERNAME, TWITTER_EMAIL, TWITTER_PASSWORD
+  auth:
+    username: ""                          # Twitter 用户名
+    email: ""                             # Twitter 邮箱
+    password: ""                          # Twitter 密码
+    cookies_file: "config/twitter_cookies.json"  # Cookie 缓存路径
+
+  # 抓取配置
+  fetch:
+    trends_count: 20                      # 获取热搜数量
+    include_tweets: false                 # 是否同时获取趋势下的推文
+
+  # 代理配置（可选）
+  proxy_url: ""                           # 代理地址
+
 
 # ===============================================================
 # 3. 数据源 - RSS 订阅
