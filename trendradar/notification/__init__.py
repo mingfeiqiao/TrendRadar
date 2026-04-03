@@ -43,6 +43,7 @@ from trendradar.notification.senders import (
     send_to_ntfy,
     send_to_bark,
     send_to_slack,
+    send_to_wps,
     SMTP_CONFIGS,
 )
 from trendradar.notification.dispatcher import NotificationDispatcher
@@ -71,6 +72,7 @@ __all__ = [
     "send_to_ntfy",
     "send_to_bark",
     "send_to_slack",
+    "send_to_wps",
     "SMTP_CONFIGS",
     # 通知调度器
     "NotificationDispatcher",

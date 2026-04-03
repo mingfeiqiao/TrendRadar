@@ -11,6 +11,7 @@
 - ntfy
 - Bark
 - Slack
+- WPS 协作
 
 每个发送函数都支持分批发送，并通过参数化配置实现与 CONFIG 的解耦。
 """
@@ -18,6 +19,7 @@
 import smtplib
 import time
 import json
+import threading
 from datetime import datetime
 from email.header import Header
 from email.mime.multipart import MIMEMultipart
@@ -28,9 +30,10 @@ from typing import Any, Callable, Dict, Optional
 from urllib.parse import urlparse
 
 import requests
+import websocket
 
 from .batch import add_batch_headers, get_max_batch_header_size
-from .formatters import convert_markdown_to_mrkdwn, strip_markdown
+from .formatters import convert_markdown_to_mrkdown, strip_markdown
 
 
 def _render_ai_analysis(ai_analysis: Any, channel: str) -> str:
@@ -1402,3 +1405,265 @@ def send_to_generic_webhook(
     print(f"{log_prefix}所有 {len(batches)} 批次发送完成 [{report_type}]")
 
     return True
+
+
+# === WPS 协作推送 ===
+
+class WPSWebSocketClient:
+    """WPS AgentSpace WebSocket 客户端（单次推送用）"""
+
+    def __init__(self, ws_url: str, wps_sid: str, app_id: str, device_name: str = "TrendRadar"):
+        self.ws_url = ws_url
+        self.wps_sid = wps_sid
+        self.app_id = app_id
+        self.device_name = device_name
+        self.device_uuid = ""
+        self.ws = None
+        self._connected = False
+        self._response_received = False
+        self._error = None
+        self._lock = threading.Lock()
+
+    def connect(self, timeout: float = 10.0) -> bool:
+        """
+        建立 WebSocket 连接
+
+        Args:
+            timeout: 连接超时时间（秒）
+
+        Returns:
+            bool: 连接是否成功
+        """
+        connected_event = threading.Event()
+
+        def on_open(ws):
+            # 发送 init 消息
+            init_msg = {
+                "event": "init",
+                "data": {
+                    "device_uuid": self.device_uuid,
+                    "device_name": self.device_name,
+                    "timestamp": int(time.time())
+                }
+            }
+            ws.send(json.dumps(init_msg))
+
+        def on_message(ws, message):
+            try:
+                data = json.loads(message)
+                event = data.get("event", "")
+
+                if event == "init":
+                    # init 响应，获取 device_uuid
+                    self.device_uuid = data.get("data", {}).get("device_uuid", "")
+                    self._connected = True
+                    connected_event.set()
+                elif event == "pong":
+                    # 心跳响应，忽略
+                    pass
+                elif event == "message":
+                    # 消息响应
+                    self._response_received = True
+                elif event == "error":
+                    self._error = data.get("data", {}).get("message", "未知错误")
+                    connected_event.set()
+            except json.JSONDecodeError:
+                pass
+
+        def on_error(ws, error):
+            self._error = str(error)
+            connected_event.set()
+
+        def on_close(ws, close_status_code, close_msg):
+            self._connected = False
+
+        # 构建 WebSocket 连接
+        headers = [f"Cookie: wps_sid={self.wps_sid}"]
+
+        try:
+            self.ws = websocket.WebSocketApp(
+                self.ws_url,
+                header=headers,
+                on_open=on_open,
+                on_message=on_message,
+                on_error=on_error,
+                on_close=on_close,
+            )
+
+            # 在后台线程中运行
+            ws_thread = threading.Thread(target=self.ws.run_forever, daemon=True)
+            ws_thread.start()
+
+            # 等待连接建立
+            if connected_event.wait(timeout=timeout):
+                return self._connected and self._error is None
+            else:
+                self._error = "连接超时"
+                return False
+
+        except Exception as e:
+            self._error = str(e)
+            return False
+
+    def send_message(self, content: str, chat_id: str) -> bool:
+        """
+        发送消息到 WPS
+
+        Args:
+            content: 消息内容
+            chat_id: 聊天 ID
+
+        Returns:
+            bool: 发送是否成功
+        """
+        if not self._connected or self.ws is None:
+            return False
+
+        try:
+            msg = {
+                "event": "message",
+                "data": {
+                    "role": "assistant",
+                    "type": "answer",
+                    "content": content,
+                    "chat_id": chat_id,
+                    "timestamp": int(time.time()),
+                    "device_uuid": self.device_uuid,
+                    "device_name": self.device_name,
+                }
+            }
+            self.ws.send(json.dumps(msg))
+            return True
+        except Exception as e:
+            self._error = str(e)
+            return False
+
+    def close(self):
+        """关闭 WebSocket 连接"""
+        if self.ws:
+            self.ws.close()
+            self.ws = None
+        self._connected = False
+
+
+def send_to_wps(
+    ws_url: str,
+    wps_sid: str,
+    app_id: str,
+    chat_id: str,
+    report_data: Dict,
+    report_type: str,
+    update_info: Optional[Dict] = None,
+    proxy_url: Optional[str] = None,
+    mode: str = "daily",
+    account_label: str = "",
+    *,
+    batch_size: int = 4000,
+    batch_interval: float = 1.0,
+    split_content_func: Callable = None,
+    rss_items: Optional[list] = None,
+    rss_new_items: Optional[list] = None,
+    ai_analysis: Any = None,
+    display_regions: Optional[Dict] = None,
+    standalone_data: Optional[Dict] = None,
+    device_name: str = "TrendRadar",
+) -> bool:
+    """
+    发送到 WPS 协作（WebSocket 单次推送）
+
+    Args:
+        ws_url: WPS AgentSpace WebSocket URL
+        wps_sid: WPS 会话标识（Cookie）
+        app_id: 应用 ID
+        chat_id: 聊天 ID（固定推送目标）
+        report_data: 报告数据
+        report_type: 报告类型
+        update_info: 更新信息（可选）
+        proxy_url: 代理 URL（可选，暂不支持）
+        mode: 报告模式 (daily/current)
+        account_label: 账号标签（多账号时显示）
+        batch_size: 批次大小（字节）
+        batch_interval: 批次发送间隔（秒）
+        split_content_func: 内容分批函数
+        rss_items: RSS 统计条目列表
+        rss_new_items: RSS 新增条目列表
+        ai_analysis: AI 分析结果
+        display_regions: 区域显示配置
+        standalone_data: 独立展示区数据
+        device_name: 设备名称
+
+    Returns:
+        bool: 发送是否成功
+    """
+    if split_content_func is None:
+        raise ValueError("split_content_func is required")
+
+    # 日志前缀
+    log_prefix = f"WPS{account_label}" if account_label else "WPS"
+
+    # 建立 WebSocket 连接
+    client = WPSWebSocketClient(ws_url, wps_sid, app_id, device_name)
+
+    if not client.connect(timeout=10.0):
+        error_msg = client._error or "连接失败"
+        print(f"{log_prefix} WebSocket 连接失败: {error_msg} [{report_type}]")
+        client.close()
+        return False
+
+    print(f"{log_prefix} WebSocket 连接成功 [{report_type}]")
+
+    # 渲染 AI 分析内容（如果有）
+    ai_content = None
+    ai_stats = None
+    if ai_analysis:
+        ai_content = _render_ai_analysis(ai_analysis, "wework")
+        if getattr(ai_analysis, "success", False):
+            ai_stats = {
+                "total_news": getattr(ai_analysis, "total_news", 0),
+                "analyzed_news": getattr(ai_analysis, "analyzed_news", 0),
+                "max_news_limit": getattr(ai_analysis, "max_news_limit", 0),
+                "hotlist_count": getattr(ai_analysis, "hotlist_count", 0),
+                "rss_count": getattr(ai_analysis, "rss_count", 0),
+            }
+
+    # 获取分批内容
+    header_reserve = get_max_batch_header_size("wework")
+    batches = split_content_func(
+        report_data, "wework", update_info, max_bytes=batch_size - header_reserve, mode=mode,
+        rss_items=rss_items,
+        rss_new_items=rss_new_items,
+        ai_content=ai_content,
+        standalone_data=standalone_data,
+        ai_stats=ai_stats,
+        report_type=report_type,
+    )
+
+    # 添加批次头部
+    batches = add_batch_headers(batches, "wework", batch_size)
+
+    print(f"{log_prefix}消息分为 {len(batches)} 批次发送 [{report_type}]")
+
+    # 逐批发送
+    success = True
+    for i, batch_content in enumerate(batches, 1):
+        content_size = len(batch_content.encode("utf-8"))
+        print(f"发送{log_prefix}第 {i}/{len(batches)} 批次，大小：{content_size} 字节 [{report_type}]")
+
+        if not client.send_message(batch_content, chat_id):
+            print(f"{log_prefix}第 {i}/{len(batches)} 批次发送失败 [{report_type}]")
+            success = False
+            break
+
+        print(f"{log_prefix}第 {i}/{len(batches)} 批次发送成功 [{report_type}]")
+
+        # 批次间间隔
+        if i < len(batches):
+            time.sleep(batch_interval)
+
+    # 关闭连接
+    client.close()
+
+    if success:
+        print(f"{log_prefix}所有 {len(batches)} 批次发送完成 [{report_type}]")
+
+    return success
