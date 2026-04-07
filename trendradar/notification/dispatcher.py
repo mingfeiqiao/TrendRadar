@@ -330,10 +330,12 @@ class NotificationDispatcher:
 
         # WPS 协作
         if self.config.get("WPS_WS_URL") and self.config.get("WPS_SID") and self.config.get("WPS_CHAT_ID"):
+            print(f"[WPS] 开始发送通知，ws_url={self.config.get('WPS_WS_URL')[:50]}...")
             results["wps"] = self._send_wps(
                 report_data, report_type, update_info, proxy_url, mode, rss_items, rss_new_items,
                 ai_analysis, display_regions, standalone_data
             )
+            print(f"[WPS] 发送结果: {'成功' if results.get('wps') else '失败'}")
 
         return results
 
@@ -820,6 +822,7 @@ class NotificationDispatcher:
         standalone_data: Optional[Dict] = None,
     ) -> bool:
         """发送到 WPS 协作（支持热榜+RSS合并+AI分析+独立展示区）"""
+        print(f"[WPS] _send_wps 被调用，report_type={report_type}")
         rd, ri, rn, ai, sd = self._apply_display_regions(
             report_data, display_regions, rss_items, rss_new_items, ai_analysis, standalone_data
         )
@@ -830,7 +833,10 @@ class NotificationDispatcher:
         app_ids = parse_multi_account_config(self.config.get("WPS_APP_ID", ""))
         chat_ids = parse_multi_account_config(self.config.get("WPS_CHAT_ID", ""))
 
+        print(f"[WPS] 配置解析: ws_urls={len(ws_urls)}, wps_sids={len(wps_sids)}, chat_ids={len(chat_ids)}")
+
         if not ws_urls or not wps_sids or not chat_ids:
+            print(f"[WPS] 配置不完整: ws_urls={ws_urls}, wps_sids={wps_sids}, chat_ids={chat_ids}")
             return False
 
         # 验证配对配置
