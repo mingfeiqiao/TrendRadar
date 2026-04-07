@@ -135,7 +135,7 @@ rss:
       max_age_days: 1
     - id: "producthunt"
       name: "producthunt"
-      url:"https://www.producthunt.com/feed"
+      url: "https://www.producthunt.com/feed"
       max_age_days: 1
     - id: "npm-package"
       name: "npm 新发布"
