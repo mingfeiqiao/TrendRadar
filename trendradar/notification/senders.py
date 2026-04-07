@@ -1437,6 +1437,7 @@ class WPSWebSocketClient:
         connected_event = threading.Event()
 
         def on_open(ws):
+            print(f"[WPS] WebSocket 连接已打开，发送 init 消息...")
             # 发送 init 消息
             init_msg = {
                 "event": "init",
@@ -1447,11 +1448,13 @@ class WPSWebSocketClient:
                 }
             }
             ws.send(json.dumps(init_msg))
+            print(f"[WPS] init 消息已发送: device_name={self.device_name}")
 
         def on_message(ws, message):
             try:
                 data = json.loads(message)
                 event = data.get("event", "")
+                print(f"[WPS] 收到消息: event={event}, data={json.dumps(data.get('data', {}), ensure_ascii=False)[:200]}")
 
                 if event == "init":
                     # init 响应，获取 device_uuid
@@ -1466,9 +1469,10 @@ class WPSWebSocketClient:
                     self._response_received = True
                 elif event == "error":
                     self._error = data.get("data", {}).get("message", "未知错误")
+                    print(f"[WPS] 服务端错误: {self._error}")
                     connected_event.set()
             except json.JSONDecodeError:
-                pass
+                print(f"[WPS] 无法解析消息: {message[:100]}")
 
         def on_error(ws, error):
             self._error = str(error)
