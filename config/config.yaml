@@ -611,12 +611,8 @@ notification:
                                       # 留空则使用默认格式：{"title": "{title}", "content": "{content}"}
 
     wps:
-      ws_url: ""                      # WPS AgentSpace WebSocket URL
-                                      # 格式：wss://agentspace.wps.cn/v7/devhub/ws/{APP_ID}/chat
       wps_sid: ""                     # WPS 会话标识（从浏览器 Cookie 获取）
-      app_id: ""                      # 应用 ID（可选）
-      chat_id: ""                     # 聊天 ID（固定推送目标）
-      device_name: "TrendRadar"       # 设备名称（可选）
+      chat_id: ""                     # 聊天 ID（群聊 ID 或用户 ID）
 
 
 # ===============================================================

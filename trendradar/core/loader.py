@@ -467,12 +467,9 @@ def _load_webhook_config(config_data: Dict) -> Dict:
         # 通用 Webhook
         "GENERIC_WEBHOOK_URL": _get_env_str("GENERIC_WEBHOOK_URL") or generic.get("webhook_url", ""),
         "GENERIC_WEBHOOK_TEMPLATE": _get_env_str("GENERIC_WEBHOOK_TEMPLATE") or generic.get("payload_template", ""),
-        # WPS 协作
-        "WPS_WS_URL": _get_env_str("WPS_WS_URL") or wps.get("ws_url", ""),
+        # WPS 协作（HTTP API 方式，只需要 wps_sid 和 chat_id）
         "WPS_SID": _get_env_str("WPS_SID") or wps.get("wps_sid", ""),
-        "WPS_APP_ID": _get_env_str("WPS_APP_ID") or wps.get("app_id", ""),
         "WPS_CHAT_ID": _get_env_str("WPS_CHAT_ID") or wps.get("chat_id", ""),
-        "WPS_DEVICE_NAME": _get_env_str("WPS_DEVICE_NAME") or wps.get("device_name", "TrendRadar"),
     }
 
 
@@ -552,10 +549,10 @@ def _print_notification_sources(config: Dict) -> None:
         notification_sources.append(f"通用Webhook({source}, {count}个账号)")
 
     # WPS 协作
-    if config.get("WPS_WS_URL") and config.get("WPS_SID") and config.get("WPS_CHAT_ID"):
-        ws_urls = parse_multi_account_config(config["WPS_WS_URL"])
-        count = min(len(ws_urls), max_accounts)
-        source = "环境变量" if os.environ.get("WPS_WS_URL") else "配置文件"
+    if config.get("WPS_SID") and config.get("WPS_CHAT_ID"):
+        wps_sids = parse_multi_account_config(config["WPS_SID"])
+        count = min(len(wps_sids), max_accounts)
+        source = "环境变量" if os.environ.get("WPS_SID") else "配置文件"
         notification_sources.append(f"WPS协作({source}, {count}个账号)")
 
     if notification_sources:

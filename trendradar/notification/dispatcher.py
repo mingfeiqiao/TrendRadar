@@ -329,8 +329,8 @@ class NotificationDispatcher:
             results["email"] = self._send_email(report_type, html_file_path)
 
         # WPS 协作
-        if self.config.get("WPS_WS_URL") and self.config.get("WPS_SID") and self.config.get("WPS_CHAT_ID"):
-            print(f"[WPS] 开始发送通知，ws_url={self.config.get('WPS_WS_URL')[:50]}...")
+        if self.config.get("WPS_SID") and self.config.get("WPS_CHAT_ID"):
+            print(f"[WPS] 开始发送通知...")
             results["wps"] = self._send_wps(
                 report_data, report_type, update_info, proxy_url, mode, rss_items, rss_new_items,
                 ai_analysis, display_regions, standalone_data
@@ -821,54 +821,44 @@ class NotificationDispatcher:
         display_regions: Optional[Dict] = None,
         standalone_data: Optional[Dict] = None,
     ) -> bool:
-        """发送到 WPS 协作（支持热榜+RSS合并+AI分析+独立展示区）"""
+        """发送到 WPS 协作（HTTP API 方式，支持热榜+RSS合并+AI分析+独立展示区）"""
         print(f"[WPS] _send_wps 被调用，report_type={report_type}")
         rd, ri, rn, ai, sd = self._apply_display_regions(
             report_data, display_regions, rss_items, rss_new_items, ai_analysis, standalone_data
         )
 
-        # 解析多账号配置
-        ws_urls = parse_multi_account_config(self.config.get("WPS_WS_URL", ""))
+        # 解析多账号配置（HTTP API 只需要 wps_sid 和 chat_id）
         wps_sids = parse_multi_account_config(self.config.get("WPS_SID", ""))
-        app_ids = parse_multi_account_config(self.config.get("WPS_APP_ID", ""))
         chat_ids = parse_multi_account_config(self.config.get("WPS_CHAT_ID", ""))
 
-        print(f"[WPS] 配置解析: ws_urls={len(ws_urls)}, wps_sids={len(wps_sids)}, chat_ids={len(chat_ids)}")
+        print(f"[WPS] 配置解析: wps_sids={len(wps_sids)}, chat_ids={len(chat_ids)}")
 
-        if not ws_urls or not wps_sids or not chat_ids:
-            print(f"[WPS] 配置不完整: ws_urls={ws_urls}, wps_sids={wps_sids}, chat_ids={chat_ids}")
+        if not wps_sids or not chat_ids:
+            print(f"[WPS] 配置不完整: wps_sids={wps_sids}, chat_ids={chat_ids}")
             return False
 
         # 验证配对配置
-        if len(ws_urls) != len(wps_sids) or len(ws_urls) != len(chat_ids):
-            print("❌ WPS 配置错误：ws_url、wps_sid、chat_id 数量不一致")
+        if len(wps_sids) != len(chat_ids):
+            print("❌ WPS 配置错误：wps_sid 和 chat_id 数量不一致")
             return False
 
         # 限制账号数量
-        ws_urls = limit_accounts(ws_urls, self.max_accounts, "WPS")
-        wps_sids = wps_sids[: len(ws_urls)]
-        if app_ids:
-            app_ids = app_ids[: len(ws_urls)]
-        chat_ids = chat_ids[: len(ws_urls)]
+        wps_sids = limit_accounts(wps_sids, self.max_accounts, "WPS")
+        chat_ids = chat_ids[: len(wps_sids)]
 
         results = []
-        for i, ws_url in enumerate(ws_urls):
-            if not ws_url:
+        for i, wps_sid in enumerate(wps_sids):
+            if not wps_sid:
                 continue
 
-            wps_sid = wps_sids[i] if i < len(wps_sids) else ""
-            app_id = app_ids[i] if app_ids and i < len(app_ids) else ""
             chat_id = chat_ids[i] if i < len(chat_ids) else ""
-
-            if not wps_sid or not chat_id:
+            if not chat_id:
                 continue
 
-            account_label = f"账号{i+1}" if len(ws_urls) > 1 else ""
+            account_label = f"账号{i+1}" if len(wps_sids) > 1 else ""
 
             result = send_to_wps(
-                ws_url=ws_url,
                 wps_sid=wps_sid,
-                app_id=app_id,
                 chat_id=chat_id,
                 report_data=rd,
                 report_type=report_type,
@@ -879,7 +869,6 @@ class NotificationDispatcher:
                 batch_size=self.config.get("WPS_BATCH_SIZE", 4000),
                 batch_interval=self.config.get("BATCH_SEND_INTERVAL", 1.0),
                 split_content_func=self.split_content_func,
-                device_name=self.config.get("WPS_DEVICE_NAME", "TrendRadar"),
                 rss_items=ri,
                 rss_new_items=rn,
                 ai_analysis=ai,

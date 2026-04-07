@@ -19,7 +19,6 @@
 import smtplib
 import time
 import json
-import threading
 from datetime import datetime
 from email.header import Header
 from email.mime.multipart import MIMEMultipart
@@ -30,7 +29,6 @@ from typing import Any, Callable, Dict, Optional
 from urllib.parse import urlparse
 
 import requests
-import websocket
 
 from .batch import add_batch_headers, get_max_batch_header_size
 from .formatters import convert_markdown_to_mrkdwn, strip_markdown
@@ -1407,156 +1405,24 @@ def send_to_generic_webhook(
     return True
 
 
-# === WPS 协作推送 ===
+# === WPS 协作推送 (HTTP API) ===
 
-class WPSWebSocketClient:
-    """WPS AgentSpace WebSocket 客户端（单次推送用）"""
+# WPS V7 API 基础 URL
+WPS_API_BASE = "https://api.wps.cn"
 
-    def __init__(self, ws_url: str, wps_sid: str, app_id: str, device_name: str = "TrendRadar"):
-        self.ws_url = ws_url
-        self.wps_sid = wps_sid
-        self.app_id = app_id
-        self.device_name = device_name
-        self.device_uuid = ""
-        self.ws = None
-        self._connected = False
-        self._response_received = False
-        self._error = None
-        self._lock = threading.Lock()
 
-    def connect(self, timeout: float = 10.0) -> bool:
-        """
-        建立 WebSocket 连接
-
-        Args:
-            timeout: 连接超时时间（秒）
-
-        Returns:
-            bool: 连接是否成功
-        """
-        connected_event = threading.Event()
-
-        def on_open(ws):
-            print(f"[WPS] WebSocket 连接已打开，发送 init 消息...")
-            # 发送 init 消息
-            init_msg = {
-                "event": "init",
-                "data": {
-                    "device_uuid": self.device_uuid,
-                    "device_name": self.device_name,
-                    "timestamp": int(time.time())
-                }
-            }
-            ws.send(json.dumps(init_msg))
-            print(f"[WPS] init 消息已发送: device_name={self.device_name}")
-
-        def on_message(ws, message):
-            try:
-                data = json.loads(message)
-                event = data.get("event", "")
-                print(f"[WPS] 收到消息: event={event}, data={json.dumps(data.get('data', {}), ensure_ascii=False)[:200]}")
-
-                if event == "init":
-                    # init 响应，获取 device_uuid
-                    self.device_uuid = data.get("data", {}).get("device_uuid", "")
-                    self._connected = True
-                    connected_event.set()
-                elif event == "pong":
-                    # 心跳响应，忽略
-                    pass
-                elif event == "message":
-                    # 消息响应
-                    self._response_received = True
-                elif event == "error":
-                    self._error = data.get("data", {}).get("message", "未知错误")
-                    print(f"[WPS] 服务端错误: {self._error}")
-                    connected_event.set()
-            except json.JSONDecodeError:
-                print(f"[WPS] 无法解析消息: {message[:100]}")
-
-        def on_error(ws, error):
-            self._error = str(error)
-            connected_event.set()
-
-        def on_close(ws, close_status_code, close_msg):
-            self._connected = False
-
-        # 构建 WebSocket 连接
-        headers = [f"Cookie: wps_sid={self.wps_sid}"]
-
-        try:
-            self.ws = websocket.WebSocketApp(
-                self.ws_url,
-                header=headers,
-                on_open=on_open,
-                on_message=on_message,
-                on_error=on_error,
-                on_close=on_close,
-            )
-
-            # 在后台线程中运行
-            ws_thread = threading.Thread(target=self.ws.run_forever, daemon=True)
-            ws_thread.start()
-
-            # 等待连接建立
-            if connected_event.wait(timeout=timeout):
-                return self._connected and self._error is None
-            else:
-                self._error = "连接超时"
-                return False
-
-        except Exception as e:
-            self._error = str(e)
-            return False
-
-    def send_message(self, content: str, chat_id: str) -> bool:
-        """
-        发送消息到 WPS
-
-        Args:
-            content: 消息内容
-            chat_id: 聊天 ID
-
-        Returns:
-            bool: 发送是否成功
-        """
-        if not self._connected or self.ws is None:
-            return False
-
-        try:
-            msg = {
-                "event": "message",
-                "data": {
-                    "role": "assistant",
-                    "type": "answer",
-                    "content": content,
-                    "chat_id": chat_id,
-                    "timestamp": int(time.time()),
-                    "device_uuid": self.device_uuid,
-                    "device_name": self.device_name,
-                }
-            }
-            msg_json = json.dumps(msg, ensure_ascii=False)
-            print(f"[WPS] 发送消息: device_uuid={self.device_uuid}, chat_id={chat_id}, content_len={len(content)}")
-            self.ws.send(msg_json)
-            return True
-        except Exception as e:
-            self._error = str(e)
-            print(f"[WPS] 发送异常: {e}")
-            return False
-
-    def close(self):
-        """关闭 WebSocket 连接"""
-        if self.ws:
-            self.ws.close()
-            self.ws = None
-        self._connected = False
+def _wps_api_headers(wps_sid: str) -> dict:
+    """构建 WPS V7 API 请求头"""
+    return {
+        "Content-Type": "application/json",
+        "Origin": "https://365.kdocs.cn",
+        "Referer": "https://365.kdocs.cn/woa/im/messages",
+        "Cookie": f"wps_sid={wps_sid}; csrf={wps_sid}",
+    }
 
 
 def send_to_wps(
-    ws_url: str,
     wps_sid: str,
-    app_id: str,
     chat_id: str,
     report_data: Dict,
     report_type: str,
@@ -1573,20 +1439,18 @@ def send_to_wps(
     ai_analysis: Any = None,
     display_regions: Optional[Dict] = None,
     standalone_data: Optional[Dict] = None,
-    device_name: str = "TrendRadar",
+    **kwargs,  # 忽略其他参数（如 ws_url, app_id, device_name）
 ) -> bool:
     """
-    发送到 WPS 协作（WebSocket 单次推送）
+    发送到 WPS 协作（HTTP API 方式）
 
     Args:
-        ws_url: WPS AgentSpace WebSocket URL
         wps_sid: WPS 会话标识（Cookie）
-        app_id: 应用 ID
-        chat_id: 聊天 ID（固定推送目标）
+        chat_id: 聊天 ID（群聊 ID 或用户 ID）
         report_data: 报告数据
         report_type: 报告类型
         update_info: 更新信息（可选）
-        proxy_url: 代理 URL（可选，暂不支持）
+        proxy_url: 代理 URL（可选）
         mode: 报告模式 (daily/current)
         account_label: 账号标签（多账号时显示）
         batch_size: 批次大小（字节）
@@ -1597,7 +1461,6 @@ def send_to_wps(
         ai_analysis: AI 分析结果
         display_regions: 区域显示配置
         standalone_data: 独立展示区数据
-        device_name: 设备名称
 
     Returns:
         bool: 发送是否成功
@@ -1608,16 +1471,10 @@ def send_to_wps(
     # 日志前缀
     log_prefix = f"WPS{account_label}" if account_label else "WPS"
 
-    # 建立 WebSocket 连接
-    client = WPSWebSocketClient(ws_url, wps_sid, app_id, device_name)
-
-    if not client.connect(timeout=10.0):
-        error_msg = client._error or "连接失败"
-        print(f"{log_prefix} WebSocket 连接失败: {error_msg} [{report_type}]")
-        client.close()
-        return False
-
-    print(f"{log_prefix} WebSocket 连接成功 [{report_type}]")
+    headers = _wps_api_headers(wps_sid)
+    proxies = None
+    if proxy_url:
+        proxies = {"http": proxy_url, "https": proxy_url}
 
     # 渲染 AI 分析内容（如果有）
     ai_content = None
@@ -1650,27 +1507,42 @@ def send_to_wps(
 
     print(f"{log_prefix}消息分为 {len(batches)} 批次发送 [{report_type}]")
 
+    # API 端点
+    url = f"{WPS_API_BASE}/v7/chats/{chat_id}/messages/create"
+
     # 逐批发送
-    success = True
     for i, batch_content in enumerate(batches, 1):
         content_size = len(batch_content.encode("utf-8"))
         print(f"发送{log_prefix}第 {i}/{len(batches)} 批次，大小：{content_size} 字节 [{report_type}]")
 
-        if not client.send_message(batch_content, chat_id):
-            print(f"{log_prefix}第 {i}/{len(batches)} 批次发送失败 [{report_type}]")
-            success = False
-            break
+        # 构建消息体 - 使用 Markdown 格式
+        payload = {
+            "type": "text",
+            "text": {
+                "type": "markdown",
+                "content": batch_content,
+            },
+        }
 
-        print(f"{log_prefix}第 {i}/{len(batches)} 批次发送成功 [{report_type}]")
+        try:
+            response = requests.post(url, headers=headers, json=payload, proxies=proxies, timeout=30)
+            result = response.json() if response.content else {}
 
-        # 批次间间隔
-        if i < len(batches):
-            time.sleep(batch_interval)
+            # 检查响应
+            if response.status_code == 200 and result.get("code") == 0:
+                print(f"{log_prefix}第 {i}/{len(batches)} 批次发送成功 [{report_type}]")
+                # 批次间间隔
+                if i < len(batches):
+                    time.sleep(batch_interval)
+            else:
+                error_msg = result.get("msg") or f"HTTP {response.status_code}"
+                print(f"{log_prefix}第 {i}/{len(batches)} 批次发送失败 [{report_type}]：{error_msg}")
+                return False
 
-    # 关闭连接
-    client.close()
+        except Exception as e:
+            print(f"{log_prefix}第 {i}/{len(batches)} 批次发送出错 [{report_type}]：{e}")
+            return False
 
-    if success:
-        print(f"{log_prefix}所有 {len(batches)} 批次发送完成 [{report_type}]")
+    print(f"{log_prefix}所有 {len(batches)} 批次发送完成 [{report_type}]")
 
-    return success
+    return True
