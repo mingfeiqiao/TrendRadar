@@ -1532,10 +1532,13 @@ class WPSWebSocketClient:
                     "device_name": self.device_name,
                 }
             }
-            self.ws.send(json.dumps(msg))
+            msg_json = json.dumps(msg, ensure_ascii=False)
+            print(f"[WPS] 发送消息: device_uuid={self.device_uuid}, chat_id={chat_id}, content_len={len(content)}")
+            self.ws.send(msg_json)
             return True
         except Exception as e:
             self._error = str(e)
+            print(f"[WPS] 发送异常: {e}")
             return False
 
     def close(self):
