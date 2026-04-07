@@ -118,10 +118,44 @@ rss:
   # - 正整数：覆盖全局设置，只推送此天数内的文章
   # - 0：禁用此频道的新鲜度过滤，推送所有文章
   feeds:
-    - id: "hacker-news"
-      name: "Hacker News"
-      url: "https://hnrss.org/frontpage"
-
+    - id: "hacker-news-top"
+      name: "Hacker News Top"
+      url: "https://rsshub-production-fcd5.up.railway.app/hackernews/best"
+      max_age_days: 1
+    - id: "github-thrending"
+      name: "Github Thrending"
+      url: "https://rsshub-production-fcd5.up.railway.app/github/trending/daily/any"
+      max_age_days: 1
+    - id: "juejin-thrending"
+      name: "掘金 Trending"
+      url: "https://rsshub-production-fcd5.up.railway.app/juejin/trending/frontend/weekly"
+    - id: "v2ex-hot"
+      name: "V2EX 热议"
+      url: "https://rsshub-production-fcd5.up.railway.app/v2ex/topics/latest"
+      max_age_days: 1
+    - id: "producthunt"
+      name: "producthunt"
+      url:"https://www.producthunt.com/feed"
+      max_age_days: 1
+    - id: "npm-package"
+      name: "npm 新发布"
+      url: "https://rsshub-production-fcd5.up.railway.app/npm/package/react"
+      max_age_days: 1
+    - id: "google-research-blog"
+      name: "Google Research Blog"
+      url: "https://rsshub-production-fcd5.up.railway.app/google/research"
+    - id: "google-developers-blog"
+      name: "Google Developers Blog"
+      url: "https://rsshub-production-fcd5.up.railway.app/google/developers/en"
+    - id: "clawhub-releases"
+      name: "clawhub-releases"
+      url: "https://github.com/openclaw/clawhub/releases.atom"
+      max_age_days: 7
+    - id: "awesome-skills"
+      name: "Awesome Skills"
+      url: "https://github.com/VoltAgent/awesome-openclaw-skills/
+  commits/main.atom"
+      max_age_days: 7
     - id: "Web3_101"
       name: "Web3_101"
       url: "https://rsshub-production-fcd5.up.railway.app/twitter/user/Web3_101"
